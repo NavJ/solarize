@@ -14,7 +14,7 @@
 
 // These values seem to affect stuff the most...
 #define SMOOTH_WINDOW 30
-#define LIN_THRESHOLD 0
+#define LIN_THRESHOLD 3
 
 static void draw_curve(unsigned char *curve) {
   int i, threshold;
