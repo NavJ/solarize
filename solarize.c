@@ -1,4 +1,3 @@
-#include "solarize.h"
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 #define STB_IMAGE_WRITE_IMPLEMENTATION
@@ -6,6 +5,7 @@
 
 #include <stdio.h>
 #include <assert.h>
+#include <stdbool.h>
 
 #define ERROR_LOAD -1
 #define ERROR_SAVE -2
@@ -14,12 +14,13 @@
 
 // These values seem to affect stuff the most...
 #define SMOOTH_WINDOW 30
-#define LIN_THRESHOLD 3
+#define LIN_THRESHOLD 0
 
 static void draw_curve(unsigned char *curve) {
   int i, threshold;
-  for (i = 0; i < 255; i += 10) {
-    for (threshold = 1; threshold <= 255; threshold *= 2) {
+  putc('\n', stdout);
+  for (threshold = 255; threshold > 0; threshold /= 2) {
+    for (i = 0; i < 255; i += 5) {
       if (curve[i] > threshold) {
         putc('x', stdout);
       } else {
@@ -28,6 +29,10 @@ static void draw_curve(unsigned char *curve) {
     }
     putc('\n', stdout);
   }
+  for (i = 0; i < 255; i += 5) {
+    putc('-', stdout);
+  }
+  putc('\n', stdout);
 }
 
 static void smooth_histogram(size_t *h) {
@@ -101,7 +106,45 @@ static void solarize_channel(unsigned char *data,
   }
 }
 
-int process_image(const char *infile) {
+// gamma expands a color in the sRGB color space
+// see: http://en.wikipedia.org/wiki/Grayscale
+float gamma_expand(float p) {
+  if (p <= 0.04045) {
+    return p / 12.92;
+  } else {
+    return pow((p + 0.055) / 1.055, 2.4);
+  }
+}
+
+float gamma_compress(float p) {
+  if (p <= 0.0031308) {
+    return 12.92 * p;
+  } else {
+    return (1.055 * pow(p, (1.0 / 2.4))) - 0.055;
+  }
+}
+
+unsigned char float_to_b(float p) {
+  return (unsigned char) (p * 255.0);
+}
+
+float b_to_float(unsigned char p) {
+  return ((float) p) / 255.0;
+}
+
+// convert to grayscale preserving luminance
+unsigned char to_grayscale(unsigned char r, unsigned char g, unsigned char b) {
+  float rlin = gamma_expand(b_to_float(r));
+  float glin = gamma_expand(b_to_float(g));
+  float blin = gamma_expand(b_to_float(b));
+  float ylin = (0.2126 * rlin) + (0.7152 * glin) + (0.0722 * blin);
+  // TODO: Try without this step to see whether gamma compression is needed
+  //       in the single-channel PNG files produced by stb_image_write.
+  float ysrgb = gamma_compress(ylin);
+  return float_to_b(ysrgb);
+}
+
+int process_image(const char *infile, bool use_grayscale) {
   int rc = 0;
 
   // load the file
@@ -109,6 +152,21 @@ int process_image(const char *infile) {
   unsigned char *data = stbi_load(infile, &width, &height, &comp, 0);
   if (data == NULL) {
     return ERROR_LOAD;
+  }
+
+  // convert to grayscale if required
+  if (use_grayscale && comp > 2) {
+    printf("%s", "Converting to grayscale... ");
+    unsigned char *grayscale_data = malloc(width * height);
+    int i;
+    for (i = 0; i < width * height; i++) {
+      unsigned char *px = &data[comp * i];
+      grayscale_data[i] = to_grayscale(px[0], px[1], px[2]);
+    }
+    stbi_image_free(data);
+    data = grayscale_data;
+    comp = 1;
+    printf("%s", "Done.\n");
   }
 
   // modify image
@@ -138,9 +196,14 @@ int process_image(const char *infile) {
 }
 
 int main(int argc, const char *argv[]) {
-  if (argc != 2) {
-    printf("Usage: %s [input]\n", argv[0]);
+  if (argc != 2 && argc != 3) {
+    printf("Usage: %s <input> [--grayscale]\n", argv[0]);
     return ERROR_ARGS;
   }
-  return process_image(argv[1]);
+  if (argc == 3 && (strcmp(argv[1], "--grayscale") == 0 ||
+                    strcmp(argv[2], "--grayscale") == 0)) {
+    return process_image(argv[1], true);
+  } else {
+    return process_image(argv[1], false);
+  }
 }
