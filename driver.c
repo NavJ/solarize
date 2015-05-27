@@ -20,6 +20,7 @@
 
 static pthread_mutex_t img_read_lock = PTHREAD_MUTEX_INITIALIZER;
 static bool use_grayscale = false;
+static bool invert = true;
 static int lin_threshold = DEFAULT_LIN_THRESHOLD;
 static int smooth_window = DEFAULT_SMOOTH_WINDOW;
 
@@ -53,24 +54,30 @@ void *process_image(void *infile_void) {
   // modify image
   if (comp < 3) {
     // grayscale
-    solarize_channel(data, width, height, comp, 0, lin_threshold, smooth_window);
+    solarize_channel(data, width, height, comp, 0,
+                     lin_threshold, smooth_window, invert);
   } else {
     // color
     int rgb;
     for (rgb = 0; rgb < 3; rgb++) {
-      solarize_channel(data, width, height, comp, rgb, lin_threshold, smooth_window);
+      solarize_channel(data, width, height, comp, rgb,
+                       lin_threshold, smooth_window, invert);
     }
   }
 
   // write the output file
   size_t inlen = strlen(infile);
   char outfile[inlen + 9];
+  memset(outfile, 0, inlen + 9);
   strncpy(outfile, infile, inlen);
   strcpy(&outfile[inlen], "_sol.png");
   // RETURNS 0 ON FAILURE WTF???
+  // also is this thread safe??? Maybe not?
+  //pthread_mutex_lock(&img_read_lock);
   if (stbi_write_png(outfile, width, height, comp, data, width * comp) == 0) {
     rc = ERROR_SAVE;
   }
+  //pthread_mutex_unlock(&img_read_lock);
 
   // free memory
   stbi_image_free(data);
@@ -84,13 +91,13 @@ void *process_image(void *infile_void) {
 }
 
 static void print_usage(const char *name) {
-  fprintf(stderr, "Usage: %s [-v] [-g] [-t THRESHOLD] [-w WINDOW] FILE...\n", name);
+  fprintf(stderr, "Usage: %s [-v] [-g] [-i] [-t THRESHOLD] [-w WINDOW] FILE...\n", name);
 }
 
 int main(int argc, char *argv[]) {
   int opt;
 
-  while ((opt = getopt(argc, argv, "vgt:w:")) != -1) {
+  while ((opt = getopt(argc, argv, "ivgt:w:")) != -1) {
     switch (opt) {
     case 'g':
       use_grayscale = true;
@@ -102,6 +109,9 @@ int main(int argc, char *argv[]) {
       smooth_window = atoi(optarg);
       break;
     case 'v':
+      break;
+    case 'i':
+      invert = false;
       break;
     default:
       print_usage(argv[0]);

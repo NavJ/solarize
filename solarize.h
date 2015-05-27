@@ -11,6 +11,7 @@ void solarize_channel(unsigned char *data,
                       int nchan,
                       int chan,
                       int lin_threshold,
-                      int smooth_window);
+                      int smooth_window,
+                      bool post_invert);
 
 #endif
