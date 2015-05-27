@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <assert.h>
 #include <stdbool.h>
+#include <unistd.h>
 
 #define ERROR_LOAD -1
 #define ERROR_SAVE -2
@@ -13,8 +14,8 @@
 #define ERROR_ARGS -4
 
 // These values seem to affect stuff the most...
-#define SMOOTH_WINDOW 30
-#define LIN_THRESHOLD 3
+#define DEFAULT_SMOOTH_WINDOW 30
+#define DEFAULT_LIN_THRESHOLD 0
 
 static void draw_curve(unsigned char *curve) {
   int i, threshold;
@@ -35,11 +36,11 @@ static void draw_curve(unsigned char *curve) {
   putc('\n', stdout);
 }
 
-static void smooth_histogram(size_t *h) {
+static void smooth_histogram(size_t *h, int smooth_window) {
   size_t hn[255];
 
   // use centered weighted average
-  int n = SMOOTH_WINDOW;
+  int n = smooth_window;
   int i, j;
   for (i = 0; i < 255; i++) {
     hn[i] = 0;
@@ -61,10 +62,12 @@ static void smooth_histogram(size_t *h) {
 }
 
 static void solarize_channel(unsigned char *data,
-                            int width,
-                            int height,
-                            int nchan,
-                            int chan) {
+                             int width,
+                             int height,
+                             int nchan,
+                             int chan,
+                             int lin_threshold,
+                             int smooth_window) {
   // build histogram
   unsigned char curve[255];
   size_t histogram[255];
@@ -77,7 +80,7 @@ static void solarize_channel(unsigned char *data,
   }
 
   // smooth the histogram
-  smooth_histogram(histogram);
+  smooth_histogram(histogram, smooth_window);
 
   // find the max in the smoothed histogram
   for (i = 0; i < 255; i++) {
@@ -90,7 +93,7 @@ static void solarize_channel(unsigned char *data,
   for (i = 0; i < 255; i++) {
     assert((255 * histogram[i]) > histogram[i]);
     unsigned char val = (255 * histogram[i]) / histmax;
-    if (val < LIN_THRESHOLD) {
+    if (val < lin_threshold) {
       curve[i] = i;
     } else {
       curve[i] = val;
@@ -144,7 +147,10 @@ unsigned char to_grayscale(unsigned char r, unsigned char g, unsigned char b) {
   return float_to_b(ysrgb);
 }
 
-int process_image(const char *infile, bool use_grayscale) {
+int process_image(const char *infile,
+                  bool use_grayscale,
+                  int lin_threshold,
+                  int smooth_window) {
   int rc = 0;
 
   // load the file
@@ -172,12 +178,12 @@ int process_image(const char *infile, bool use_grayscale) {
   // modify image
   if (comp < 3) {
     // grayscale
-    solarize_channel(data, width, height, comp, 0);
+    solarize_channel(data, width, height, comp, 0, lin_threshold, smooth_window);
   } else {
     // color
     int rgb;
     for (rgb = 0; rgb < 3; rgb++) {
-      solarize_channel(data, width, height, comp, rgb);
+      solarize_channel(data, width, height, comp, rgb, lin_threshold, smooth_window);
     }
   }
 
@@ -195,15 +201,34 @@ int process_image(const char *infile, bool use_grayscale) {
   return rc;
 }
 
-int main(int argc, const char *argv[]) {
-  if (argc != 2 && argc != 3) {
-    printf("Usage: %s <input> [--grayscale]\n", argv[0]);
-    return ERROR_ARGS;
+int main(int argc, char *argv[]) {
+  int opt;
+  int smooth_window = DEFAULT_SMOOTH_WINDOW;
+  int lin_threshold = DEFAULT_LIN_THRESHOLD;
+  bool use_grayscale = false;
+
+  while ((opt = getopt(argc, argv, "gt:w:")) != -1) {
+    switch (opt) {
+    case 'g':
+      use_grayscale = true;
+      break;
+    case 't':
+      lin_threshold = atoi(optarg);
+      break;
+    case 'w':
+      smooth_window = atoi(optarg);
+      break;
+    default:
+      fprintf(stderr, "Usage: %s [-g] [-t THRESHOLD] [-w WINDOW] filename\n", argv[0]);
+      exit(EXIT_FAILURE);
+    }
   }
-  if (argc == 3 && (strcmp(argv[1], "--grayscale") == 0 ||
-                    strcmp(argv[2], "--grayscale") == 0)) {
-    return process_image(argv[1], true);
-  } else {
-    return process_image(argv[1], false);
+
+  if (optind >= argc) {
+    fprintf(stderr, "Usage: %s [-g] [-t THRESHOLD] [-w WINDOW] filename\n", argv[0]);
+    exit(EXIT_FAILURE);
   }
+
+  const char *name = argv[optind];
+  return process_image(name, use_grayscale, lin_threshold, smooth_window);
 }
