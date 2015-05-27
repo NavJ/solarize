@@ -2,15 +2,16 @@
   CC = gcc
 
   # compiler flags:
-  CFLAGS  = -g -Wall -Wextra -lm
+  CFLAGS  = -g -Wall -Wextra -pthread
+  LINKFLAGS = -lm
 
   # the build target executable:
   TARGET = solarize
 
   all: $(TARGET)
 
-  $(TARGET): $(TARGET).c
-		$(CC) $(CFLAGS) -o $(TARGET) $(TARGET).c
+  $(TARGET): driver.c solarize.h solarize.c
+		$(CC) $(CFLAGS) -o $(TARGET) driver.c solarize.c $(LINKFLAGS)
 
   clean:
 		$(RM) $(TARGET)
