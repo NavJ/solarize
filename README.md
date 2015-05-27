@@ -18,3 +18,5 @@ To run: ```./solarize [-v] [-g] [-t THRESHOLD] [-w WINDOW] FILE...```
                    window results in less "rough" images (less starkly
                    saturated). Somewhere around 20-40 seems to be the sweet
                    spot.
+* You can use multiple files. It will spawn a thread per image, taking
+  hopefully advantage of parallelism.
