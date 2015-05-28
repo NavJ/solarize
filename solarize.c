@@ -72,7 +72,7 @@ void solarize_channel(const size_t *histogram,
                       int lin_threshold,
                       bool post_invert) {
   unsigned char curve[NCOLORS];
-  size_t histmax;
+  size_t histmax = 1;
   int i;
 
   // find the max in the smoothed histogram

@@ -1,17 +1,7 @@
- # the compiler: gcc for C program, define as g++ for C++
-  CC = gcc
+all: solarize
 
-  # compiler flags:
-  CFLAGS  = -g -Wall -Wextra -pthread
-  LINKFLAGS = -lm
+solarize: driver_win.c solarize.h solarize.c
+    cl driver_win.c solarize.c
 
-  # the build target executable:
-  TARGET = solarize
-
-  all: $(TARGET)
-
-  $(TARGET): driver.c solarize.h solarize.c
-		$(CC) $(CFLAGS) -o $(TARGET) driver.c solarize.c $(LINKFLAGS)
-
-  clean:
-		$(RM) $(TARGET)
+clean:
+    del *.obj *.exe
