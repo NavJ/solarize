@@ -7,14 +7,11 @@
 #include <string.h>
 #include <stdint.h>
 
-// bit depth -- might be 16 bit in the future
-#define DEPTH 256
-
 static void draw_curve(unsigned char *curve) {
   int i, threshold;
   putc('\n', stdout);
-  for (threshold = DEPTH - 1; threshold > 0; threshold /= 2) {
-    for (i = 0; i < DEPTH; i += 5) {
+  for (threshold = NCOLORS - 1; threshold > 0; threshold /= 2) {
+    for (i = 0; i < NCOLORS; i += 5) {
       if (curve[i] > threshold) {
         putc('x', stdout);
       } else {
@@ -23,26 +20,25 @@ static void draw_curve(unsigned char *curve) {
     }
     putc('\n', stdout);
   }
-  for (i = 0; i < DEPTH; i += 5) {
+  for (i = 0; i < NCOLORS; i += 5) {
     putc('-', stdout);
   }
   putc('\n', stdout);
 }
 
-static void smooth_histogram(size_t *h, int smooth_window) {
-  size_t hn[DEPTH];
-  memset(hn, 0, DEPTH * sizeof(size_t));
+void smooth_histogram(const size_t *histogram, int smooth_window, size_t *out) {
+  memset(out, 0, NCOLORS * sizeof(size_t));
 
   // use centered weighted average
   int n = smooth_window;
   int i, j;
-  for (i = 0; i < DEPTH; i++) {
+  for (i = 0; i < NCOLORS; i++) {
     // use a big int to prevent overflows
     uint64_t val = 0;
     for (j = -n; j <= n; j++) {
-      if ((i + j) >= 0 && (i + j) < DEPTH) {
+      if ((i + j) >= 0 && (i + j) < NCOLORS) {
         // weighted so middle element i has weight (n * i)
-        uint64_t to_add = h[i + j];
+        uint64_t to_add = histogram[i + j];
         to_add *= (n - abs(j));
         val += to_add;
       }
@@ -51,53 +47,45 @@ static void smooth_histogram(size_t *h, int smooth_window) {
     // 2 * (n + (n - 1) + ... + 2 + 1) - n [we only have 1 middle elem] = n^2
     val /= n;
     val /= n;
-    hn[i] = val;
-  }
-
-  // copy back to original histogram
-  for (i = 0; i < DEPTH; i++) {
-    h[i] = hn[i];
+    out[i] = val;
   }
 }
 
-void solarize_channel(unsigned char *data,
-                      int width,
-                      int height,
-                      int nchan,
-                      int chan,
-                      int lin_threshold,
-                      int smooth_window,
-                      bool post_invert) {
-  //printf("Solarizing channel %d, t: %d, w: %d.\n", chan, lin_threshold, smooth_window);
-  assert(lin_threshold >= 0 && smooth_window >= 0);
-
-  // build histogram
-  unsigned char curve[DEPTH];
-  size_t histogram[DEPTH];
-  memset(histogram, 0, DEPTH * sizeof(size_t));
-  size_t histmax = 0;
+void build_histogram(const unsigned char *data,
+                     int n,
+                     int nchan,
+                     int chan,
+                     size_t *histogram) {
   int i;
-  for (i = 0; i < width * height; i++) {
+  memset(histogram, 0, NCOLORS * sizeof(size_t));
+  for (i = 0; i < n; i++) {
     unsigned char val = data[(i * nchan) + chan];
     histogram[val]++;
   }
+}
 
-  // smooth the histogram
-  if (smooth_window > 0) {
-    smooth_histogram(histogram, smooth_window);
-  }
+void solarize_channel(const size_t *histogram,
+                      unsigned char *data,
+                      int n,
+                      int nchan,
+                      int chan,
+                      int lin_threshold,
+                      bool post_invert) {
+  unsigned char curve[NCOLORS];
+  size_t histmax;
+  int i;
 
   // find the max in the smoothed histogram
-  for (i = 0; i < DEPTH; i++) {
+  for (i = 0; i < NCOLORS; i++) {
     if (histogram[i] > histmax) {
       histmax = histogram[i];
     }
   }
 
   // normalize the histogram to a function
-  for (i = 0; i < DEPTH; i++) {
-    assert((256 * histogram[i]) >= histogram[i]);
-    unsigned char val = (DEPTH * histogram[i]) / histmax;
+  for (i = 0; i < NCOLORS; i++) {
+    assert((NCOLORS * histogram[i]) >= histogram[i]);
+    unsigned char val = (NCOLORS * histogram[i]) / histmax;
     if (val < lin_threshold) {
       curve[i] = i;
     } else {
@@ -106,10 +94,10 @@ void solarize_channel(unsigned char *data,
   }
 
   // modify the data for the channel
-  for (i = 0; i < width * height; i++) {
+  for (i = 0; i < n; i++) {
     unsigned char val = data[(i * nchan) + chan];
     if (post_invert) {
-      data[(i * nchan) + chan] = DEPTH - curve[val];
+      data[(i * nchan) + chan] = NCOLORS - curve[val];
     } else {
       data[(i * nchan) + chan] = curve[val];
     }
@@ -135,11 +123,11 @@ static float gamma_compress(float p) {
 }
 
 static unsigned char float_to_b(float p) {
-  return (unsigned char) (p * ((float) DEPTH));
+  return (unsigned char) (p * ((float) NCOLORS));
 }
 
 static float b_to_float(unsigned char p) {
-  return ((float) p) / ((float) DEPTH);
+  return ((float) p) / ((float) NCOLORS);
 }
 
 // convert to grayscale preserving luminance
@@ -156,7 +144,7 @@ static unsigned char px_to_grayscale(unsigned char r, unsigned char g, unsigned 
 
 
 // requires exactly 3 channels in input
-void to_grayscale(const unsigned char *in, unsigned char *out, int n) {
+void to_grayscale(const unsigned char *in, int n, unsigned char *out) {
   int i;
   for (i = 0; i < n; i++) {
     const unsigned char *px = &in[i * 3];

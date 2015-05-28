@@ -42,7 +42,7 @@ void *process_image(void *infile_void) {
   if (use_grayscale && comp == 3) {
     printf("%s", "Converting to grayscale... ");
     unsigned char *grayscale_data = malloc(width * height);
-    to_grayscale(data, grayscale_data, width * height);
+    to_grayscale(data, width * height, grayscale_data);
     stbi_image_free(data);
     data = grayscale_data;
     comp = 1;
@@ -52,17 +52,14 @@ void *process_image(void *infile_void) {
   }
 
   // modify image
-  if (comp < 3) {
-    // grayscale
-    solarize_channel(data, width, height, comp, 0,
-                     lin_threshold, smooth_window, invert);
-  } else {
-    // color
-    int rgb;
-    for (rgb = 0; rgb < 3; rgb++) {
-      solarize_channel(data, width, height, comp, rgb,
-                       lin_threshold, smooth_window, invert);
-    }
+  int i;
+  for (i = 0; i < comp; i++) {
+    size_t histogram[2 << BIT_DEPTH];
+    build_histogram(data, width * height, comp, i, histogram);
+    size_t smoothed_histogram[2 << BIT_DEPTH];
+    smooth_histogram(histogram, smooth_window, smoothed_histogram);
+    solarize_channel(smoothed_histogram, data, width * height, comp, i,
+                     lin_threshold, invert);
   }
 
   // write the output file
