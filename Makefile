@@ -3,7 +3,7 @@ CC = gcc
 
 # compiler flags:
 CFLAGS  = -g -Wall -Wextra -pthread
-LINKFLAGS = -lm
+LINKFLAGS = -lm -lcomdlg32
 
 # the build target executable:
 TARGET = solarize

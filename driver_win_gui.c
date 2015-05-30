@@ -10,7 +10,7 @@
 
 const char g_szClassName[] = "solarizeWindowClass";
 struct img_t {
-  char *pchData;
+  unsigned char *pchData;
   int iWidth;
   int iHeight;
   int iChannels;
@@ -19,7 +19,7 @@ struct img_t {
 } g_RawImage;
 
 struct curr_img_t {
-  char *pchData;
+  unsigned char *pchData;
   int iChannels;
   int iSmoothWindow;
   int iLinThreshold;
@@ -42,14 +42,14 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
       ofn.hwndOwner = hwnd;
       ofn.lpstrFilter = "Image Files (*.jpg)\0*.jpg\0All Files (*.*)\0*.*\0";
       ofn.lpstrFile = szOpenFile;
-      ofn.nMakeFile = MAX_PATH;
+      ofn.nMaxFile = MAX_PATH;
       ofn.Flags = OFN_EXPLORER | OFN_FILEMUSTEXIST | OFN_HIDEREADONLY;
       ofn.lpstrDefExt = "jpg";
 
       if (GetOpenFileName(&ofn)) {
 	int iWidth, iHeight, iChannels;
-	char *pchLoaded = stbi_load(szOpenFile, &iWidth, &iHeight,
-				    &iChannels, 0);
+	unsigned char *pchLoaded = stbi_load(szOpenFile, &iWidth, &iHeight,
+					     &iChannels, 0);
 	if (pchLoaded == NULL) {
 	  // failed to load the image
 	  HINSTANCE hInstance = GetModuleHandle(NULL);
@@ -65,7 +65,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 	  // compute histograms for each channel
 	  for (i = 0; i < iChannels; i++) {
 	    build_histogram(pchLoaded, iWidth * iHeight,
-			    iChannels, i, &g_RawImage.histogram[i]);
+			    iChannels, i, g_RawImage.histogram[i]);
 	  }
 
 	  // set current image to be displayed
@@ -87,18 +87,18 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 	  g_RawImage.iWidth = iWidth;
 	  g_RawImage.iHeight = iHeight;
 	  g_RawImage.iChannels = iChannels;
-	  strcpy(&g_RawImage.szName, szOpenFile);
+	  strcpy(g_RawImage.szName, szOpenFile);
 
 	  // TODO: Refactor this bit
 	  for (i = 0; i < iChannels; i++) {
 	    // copy & mod histogram
-	    smooth_histogram(&g_RawImage.histogram[i],
+	    smooth_histogram(g_RawImage.histogram[i],
 			     g_CurrentImage.iSmoothWindow,
-			     &g_CurrentImage.histogram[i]);
+			     g_CurrentImage.histogram[i]);
 	  
 	    // copy and solarize image data
-	    solarize_channel(&g_CurrentImage.histogram[i],
-			     g_RawImage.pchData,
+	    solarize_channel(g_CurrentImage.histogram[i],
+			     g_CurrentImage.pchData,
 			     g_RawImage.iWidth * g_RawImage.iHeight,
 			     g_RawImage.iChannels, i,
 			     g_CurrentImage.iLinThreshold,
@@ -116,31 +116,32 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     }
     case ID_FILE_SAVE: {
       OPENFILENAME ofn;
-      char szFileName[MAX_PATH] = "";
+      char szOpenFile[MAX_PATH] = "";
       ZeroMemory(&ofn, sizeof(ofn));
       ofn.lStructSize = sizeof(ofn);
       ofn.hwndOwner = hwnd;
       ofn.lpstrFilter = "Image Files (*.png)\0*.png\0All Files (*.*)\0*.*\0";
       ofn.lpstrFile = szOpenFile;
-      ofn.nMakeFile = MAX_PATH;
+      ofn.nMaxFile = MAX_PATH;
       ofn.Flags = (OFN_EXPLORER | OFN_PATHMUSTEXIST |
 		   OFN_HIDEREADONLY | OFN_OVERWRITEPROMPT);
       ofn.lpstrDefExt = "png";
 
       if (GetSaveFileName(&ofn)) {
-	int rc = stbi_write_png(szFileName,
+	int rc = stbi_write_png(szOpenFile,
 				g_RawImage.iWidth, g_RawImage.iHeight,
 				g_CurrentImage.iChannels,
-				g_CurrentImage.pchData);
+				g_CurrentImage.pchData,
+				g_RawImage.iWidth * g_CurrentImage.iChannels);
 	// returns 0 on failure wtf?
 	if (rc == 0) {
 	  HINSTANCE hInstance = GetModuleHandle(NULL);
 	  MessageBox(hwnd, szOpenFile,
-		     "Successfully saved to:", MB_OK | MB_ICONINFORMATION);
+		     "Failed to save to:", MB_OK | MB_ICONEXCLAMATION);
 	} else {
 	  HINSTANCE hInstance = GetModuleHandle(NULL);
 	  MessageBox(hwnd, szOpenFile,
-		     "Failed to save to:", MB_OK | MB_ICONEXCLAMATION);
+		     "Successfully saved to:", MB_OK | MB_ICONINFORMATION);
 	}
       }
       break;
