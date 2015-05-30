@@ -6,6 +6,9 @@
 
 #define BIT_DEPTH 8
 #define NCOLORS 256
+#define MAX_CHANNELS 4
+#define DEFAULT_SMOOTH_WINDOW 30
+#define DEFAULT_LIN_THRESHOLD 0
 
 void to_grayscale(const unsigned char *in, int n, unsigned char *out);
 

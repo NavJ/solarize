@@ -1,8 +1,31 @@
+#include "solarize.h"
 #include "resource.h"
+
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "stb_image_write.h"
 
 #include <windows.h>
 
 const char g_szClassName[] = "solarizeWindowClass";
+struct img_t {
+  char *pchData;
+  int iWidth;
+  int iHeight;
+  int iChannels;
+  char szName[MAX_PATH];
+  size_t histogram[NCOLORS][MAX_CHANNELS];
+} g_RawImage;
+
+struct curr_img_t {
+  char *pchData;
+  int iChannels;
+  int iSmoothWindow;
+  int iLinThreshold;
+  bool iInvert;
+  size_t histogram[NCOLORS][MAX_CHANNELS];
+} g_CurrentImage;
 
 // step 4: the window procedure
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
@@ -10,25 +33,137 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
   case WM_COMMAND:
     // handle menu presses
     switch(LOWORD(wParam)) {
-    case ID_FILE_OPEN:
+    case ID_FILE_OPEN: {
+      // TODO: Refactor this open dialogue...
+      char szOpenFile[MAX_PATH] = "";
+      OPENFILENAME ofn;
+      ZeroMemory(&ofn, sizeof(ofn));
+      ofn.lStructSize = sizeof(ofn);
+      ofn.hwndOwner = hwnd;
+      ofn.lpstrFilter = "Image Files (*.jpg)\0*.jpg\0All Files (*.*)\0*.*\0";
+      ofn.lpstrFile = szOpenFile;
+      ofn.nMakeFile = MAX_PATH;
+      ofn.Flags = OFN_EXPLORER | OFN_FILEMUSTEXIST | OFN_HIDEREADONLY;
+      ofn.lpstrDefExt = "jpg";
+
+      if (GetOpenFileName(&ofn)) {
+	int iWidth, iHeight, iChannels;
+	char *pchLoaded = stbi_load(szOpenFile, &iWidth, &iHeight,
+				    &iChannels, 0);
+	if (pchLoaded == NULL) {
+	  // failed to load the image
+	  HINSTANCE hInstance = GetModuleHandle(NULL);
+	  MessageBox(hwnd, szOpenFile,
+		     "Invalid image:", MB_OK | MB_ICONEXCLAMATION);
+	} else {
+	  int i;
+	  // dump image into the struct
+	  if (g_RawImage.pchData != NULL) {
+	    stbi_image_free(g_RawImage.pchData);
+	  }
+
+	  // compute histograms for each channel
+	  for (i = 0; i < iChannels; i++) {
+	    build_histogram(pchLoaded, iWidth * iHeight,
+			    iChannels, i, &g_RawImage.histogram[i]);
+	  }
+
+	  // set current image to be displayed
+	  // free + malloc if we need to increase size, realloc if decrease
+	  if (g_RawImage.iWidth * g_RawImage.iHeight * g_RawImage.iChannels <
+	      iChannels * iWidth * iHeight) {
+	    free(g_CurrentImage.pchData);
+	    g_CurrentImage.pchData = malloc(iChannels * iWidth * iHeight);
+	  } else {
+	    realloc(g_CurrentImage.pchData, iChannels * iWidth * iHeight);
+	  }
+	  g_CurrentImage.iChannels = iChannels;
+	  g_CurrentImage.iInvert = true;
+	  g_CurrentImage.iSmoothWindow = DEFAULT_SMOOTH_WINDOW;
+	  g_CurrentImage.iLinThreshold = DEFAULT_LIN_THRESHOLD;
+
+	  // save original file data to speed up further changes
+	  g_RawImage.pchData = pchLoaded;
+	  g_RawImage.iWidth = iWidth;
+	  g_RawImage.iHeight = iHeight;
+	  g_RawImage.iChannels = iChannels;
+	  strcpy(&g_RawImage.szName, szOpenFile);
+
+	  // TODO: Refactor this bit
+	  for (i = 0; i < iChannels; i++) {
+	    // copy & mod histogram
+	    smooth_histogram(&g_RawImage.histogram[i],
+			     g_CurrentImage.iSmoothWindow,
+			     &g_CurrentImage.histogram[i]);
+	  
+	    // copy and solarize image data
+	    solarize_channel(&g_CurrentImage.histogram[i],
+			     g_RawImage.pchData,
+			     g_RawImage.iWidth * g_RawImage.iHeight,
+			     g_RawImage.iChannels, i,
+			     g_CurrentImage.iLinThreshold,
+			     g_CurrentImage.iInvert);
+	  }
+
+	  // populate the bitmap
+	  // TODO
+	  
+	  // display the solarized image
+	  PostMessage(hwnd, WM_PAINT, 0, 0);
+	}
+      }
       break;
+    }
+    case ID_FILE_SAVE: {
+      OPENFILENAME ofn;
+      char szFileName[MAX_PATH] = "";
+      ZeroMemory(&ofn, sizeof(ofn));
+      ofn.lStructSize = sizeof(ofn);
+      ofn.hwndOwner = hwnd;
+      ofn.lpstrFilter = "Image Files (*.png)\0*.png\0All Files (*.*)\0*.*\0";
+      ofn.lpstrFile = szOpenFile;
+      ofn.nMakeFile = MAX_PATH;
+      ofn.Flags = (OFN_EXPLORER | OFN_PATHMUSTEXIST |
+		   OFN_HIDEREADONLY | OFN_OVERWRITEPROMPT);
+      ofn.lpstrDefExt = "png";
+
+      if (GetSaveFileName(&ofn)) {
+	int rc = stbi_write_png(szFileName,
+				g_RawImage.iWidth, g_RawImage.iHeight,
+				g_CurrentImage.iChannels,
+				g_CurrentImage.pchData);
+	// returns 0 on failure wtf?
+	if (rc == 0) {
+	  HINSTANCE hInstance = GetModuleHandle(NULL);
+	  MessageBox(hwnd, szOpenFile,
+		     "Successfully saved to:", MB_OK | MB_ICONINFORMATION);
+	} else {
+	  HINSTANCE hInstance = GetModuleHandle(NULL);
+	  MessageBox(hwnd, szOpenFile,
+		     "Failed to save to:", MB_OK | MB_ICONEXCLAMATION);
+	}
+      }
+      break;
+    }
     case ID_FILE_EXIT:
       PostMessage(hwnd, WM_CLOSE, 0, 0);
       break;
     }
     break;
+  case WM_PAINT: {
+    // draw the solarized image
+    PAINTSTRUCT ps;
+    HDC hdc = BeginPaint(hwnd, &ps);
+    // TODO: Figure out GDI & how to use BitBlt here to draw the bitmap
+    EndPaint(hwnd, &ps);
+    break;
+  }
   case WM_CLOSE:
     DestroyWindow(hwnd);
     break;
   case WM_DESTROY:
     PostQuitMessage(0);
     break;
-  case WM_LBUTTONDOWN: {
-    char szFileName[MAX_PATH];
-    HINSTANCE hInstance = GetModuleHandle(NULL);
-    GetModuleFileName(hInstance, szFileName, MAX_PATH);
-    MessageBox(hwnd, szFileName, "This Program is:", MB_OK | MB_ICONINFORMATION);
-  }
   default:
     return DefWindowProc(hwnd, msg, wParam, lParam);
   }

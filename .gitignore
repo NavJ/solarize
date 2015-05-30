@@ -1,3 +1,6 @@
 solarize
 *.jpg
 *.png
+*~
+*.o
+*.exe
