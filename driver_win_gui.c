@@ -97,6 +97,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 			     g_CurrentImage.histogram[i]);
 	  
 	    // copy and solarize image data
+	    // TODO: Remove this memcpy by refactoring solarize.c
+	    memcpy(g_CurrentImage.pchData, g_RawImage.pchData,
+		   iWidth * iHeight * iChannels);
 	    solarize_channel(g_CurrentImage.histogram[i],
 			     g_CurrentImage.pchData,
 			     g_RawImage.iWidth * g_RawImage.iHeight,

@@ -7,12 +7,18 @@
 #include <string.h>
 #include <stdint.h>
 
-static void draw_curve(unsigned char *curve) {
-  int i, threshold;
+void draw_histogram(const size_t histogram[NCOLORS]) {
+  int max = 0, i, threshold;
+  for (i = 0; i < NCOLORS; i++) {
+    if (histogram[i] > max) {
+      max = histogram[i];
+    }
+  }
+
   putc('\n', stdout);
-  for (threshold = NCOLORS - 1; threshold > 0; threshold /= 2) {
+  for (threshold = max - 1; threshold > 0; threshold /= 2) {
     for (i = 0; i < NCOLORS; i += 5) {
-      if (curve[i] > threshold) {
+      if (histogram[i] > threshold) {
         putc('x', stdout);
       } else {
         putc(' ', stdout);

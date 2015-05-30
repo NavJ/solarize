@@ -10,6 +10,8 @@
 #define DEFAULT_SMOOTH_WINDOW 30
 #define DEFAULT_LIN_THRESHOLD 0
 
+void draw_histogram(const size_t histogram[NCOLORS]);
+
 void to_grayscale(const unsigned char *in, int n, unsigned char *out);
 
 // out (and all histograms) must be of length 2^BIT_DEPTH
