@@ -2,8 +2,8 @@
 CC = gcc
 
 # compiler flags:
-CFLAGS  = -g -Wall -Wextra -pthread
-LINKFLAGS = -lm -lcomdlg32
+CFLAGS  = -g -Wall -Wextra -pthread -Wno-unused-value -Wno-unused-parameter -Wno-unused-variable
+LINKFLAGS = -lm -lcomdlg32 -luser32 -lcomctl32
 
 # the build target executable:
 TARGET = solarize

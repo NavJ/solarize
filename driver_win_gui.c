@@ -5,8 +5,16 @@
 #include "stb_image.h"
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
+#define STB_IMAGE_RESIZE_IMPLEMENTATION
+#include "stb_image_resize.h"
 
 #include <windows.h>
+#include <commctrl.h>
+
+#define IMG_PREVIEW_WIDTH   50
+#define IMG_PREVIEW_HEIGHT  50
+#define IMG_PREVIEW_MAX_CH  4
+#define IMG_PREVIEW_SIZE    10000
 
 const char g_szClassName[] = "solarizeWindowClass";
 struct img_t {
@@ -18,14 +26,15 @@ struct img_t {
   size_t histogram[NCOLORS][MAX_CHANNELS];
 } g_RawImage;
 
-struct curr_img_t {
-  unsigned char *pchData;
+struct preview_t {
   int iChannels;
   int iSmoothWindow;
   int iLinThreshold;
   bool iInvert;
   size_t histogram[NCOLORS][MAX_CHANNELS];
-} g_CurrentImage;
+  unsigned char pchOrigData[IMG_PREVIEW_SIZE];
+  unsigned char pchData[IMG_PREVIEW_SIZE];
+} g_Preview;
 
 // step 4: the window procedure
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
@@ -68,20 +77,6 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 			    iChannels, i, g_RawImage.histogram[i]);
 	  }
 
-	  // set current image to be displayed
-	  // free + malloc if we need to increase size, realloc if decrease
-	  if (g_RawImage.iWidth * g_RawImage.iHeight * g_RawImage.iChannels <
-	      iChannels * iWidth * iHeight) {
-	    free(g_CurrentImage.pchData);
-	    g_CurrentImage.pchData = malloc(iChannels * iWidth * iHeight);
-	  } else {
-	    realloc(g_CurrentImage.pchData, iChannels * iWidth * iHeight);
-	  }
-	  g_CurrentImage.iChannels = iChannels;
-	  g_CurrentImage.iInvert = true;
-	  g_CurrentImage.iSmoothWindow = DEFAULT_SMOOTH_WINDOW;
-	  g_CurrentImage.iLinThreshold = DEFAULT_LIN_THRESHOLD;
-
 	  // save original file data to speed up further changes
 	  g_RawImage.pchData = pchLoaded;
 	  g_RawImage.iWidth = iWidth;
@@ -89,23 +84,32 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 	  g_RawImage.iChannels = iChannels;
 	  strcpy(g_RawImage.szName, szOpenFile);
 
+	  // set current image to be displayed
+	  stbir_resize_uint8_srgb(pchLoaded, iWidth, iHeight, 0,
+				  g_Preview.pchOrigData,
+				  IMG_PREVIEW_WIDTH, IMG_PREVIEW_HEIGHT, 0,
+				  iChannels, STBIR_ALPHA_CHANNEL_NONE, 0);
+	  g_Preview.iChannels = iChannels;
+	  g_Preview.iInvert = true;
+	  g_Preview.iSmoothWindow = DEFAULT_SMOOTH_WINDOW;
+	  g_Preview.iLinThreshold = DEFAULT_LIN_THRESHOLD;
+
 	  // TODO: Refactor this bit
 	  for (i = 0; i < iChannels; i++) {
 	    // copy & mod histogram
 	    smooth_histogram(g_RawImage.histogram[i],
-			     g_CurrentImage.iSmoothWindow,
-			     g_CurrentImage.histogram[i]);
+			     g_Preview.iSmoothWindow,
+			     g_Preview.histogram[i]);
 	  
-	    // copy and solarize image data
-	    // TODO: Remove this memcpy by refactoring solarize.c
-	    memcpy(g_CurrentImage.pchData, g_RawImage.pchData,
-		   iWidth * iHeight * iChannels);
-	    solarize_channel(g_CurrentImage.histogram[i],
-			     g_CurrentImage.pchData,
-			     g_RawImage.iWidth * g_RawImage.iHeight,
-			     g_RawImage.iChannels, i,
-			     g_CurrentImage.iLinThreshold,
-			     g_CurrentImage.iInvert);
+	    // copy and solarize image data (TODO: refactor to remove this copy)
+	    memcpy(g_Preview.pchData, g_Preview.pchOrigData,
+		   IMG_PREVIEW_WIDTH * IMG_PREVIEW_HEIGHT * iChannels);
+	    solarize_channel(g_Preview.histogram[i],
+			     g_Preview.pchData,
+			     IMG_PREVIEW_WIDTH * IMG_PREVIEW_HEIGHT,
+			     g_Preview.iChannels, i,
+			     g_Preview.iLinThreshold,
+			     g_Preview.iInvert);
 	  }
 
 	  // populate the bitmap
@@ -131,11 +135,36 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
       ofn.lpstrDefExt = "png";
 
       if (GetSaveFileName(&ofn)) {
+	int j;
+
+	// create full-size output
+	size_t output_size = (g_RawImage.iChannels *
+			      g_RawImage.iWidth *
+			      g_RawImage.iHeight);
+	unsigned char *output = malloc(output_size);
+	if (output == NULL) {
+	  HINSTANCE hInstance = GetModuleHandle(NULL);
+	  MessageBox(hwnd, szOpenFile,
+		     "Failed to save to:", MB_OK | MB_ICONEXCLAMATION);
+	  break;
+	}
+	
+	// TODO: Copy in solarize channel!
+	memcpy(output, g_RawImage.pchData, output_size);
+	for (j = 0; j < g_RawImage.iChannels; j++) {
+	  solarize_channel(g_Preview.histogram[j],
+			   output, output_size,
+			   g_RawImage.iChannels, j,
+			   g_Preview.iLinThreshold,
+			   g_Preview.iInvert);
+	}
+	
 	int rc = stbi_write_png(szOpenFile,
 				g_RawImage.iWidth, g_RawImage.iHeight,
-				g_CurrentImage.iChannels,
-				g_CurrentImage.pchData,
-				g_RawImage.iWidth * g_CurrentImage.iChannels);
+				g_RawImage.iChannels,
+				output,
+				g_RawImage.iWidth * g_RawImage.iChannels);
+	free(output);
 	// returns 0 on failure wtf?
 	if (rc == 0) {
 	  HINSTANCE hInstance = GetModuleHandle(NULL);
@@ -157,8 +186,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
   case WM_PAINT: {
     // draw the solarized image
     PAINTSTRUCT ps;
-    HDC hdc = BeginPaint(hwnd, &ps);
-    // TODO: Figure out GDI & how to use BitBlt here to draw the bitmap
+    HDC screen = BeginPaint(hwnd, &ps);
+    // TODO: Draw the image.
     EndPaint(hwnd, &ps);
     break;
   }
@@ -177,7 +206,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 		   LPSTR lpCmdLine, int nCmdShow) {
   WNDCLASSEX wc;
-  HWND hwnd;
+  HWND hwnd, hwndTrackSM, hwndTrackLT, hwndInvert;
   MSG Msg;
 
   // step 1: register window class
@@ -206,7 +235,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 			g_szClassName,
 			"Window Title",
 			WS_OVERLAPPEDWINDOW,
-			CW_USEDEFAULT, CW_USEDEFAULT, 240, 120,
+			CW_USEDEFAULT, CW_USEDEFAULT, 500, 200,
 			NULL, NULL, hInstance, NULL);
   if (hwnd == NULL) {
     MessageBox(NULL, "Window creation failed!", "ERROR!", MB_ICONEXCLAMATION | MB_OK);
@@ -216,11 +245,53 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
   ShowWindow(hwnd, nCmdShow);
   UpdateWindow(hwnd);
 
+  // create trackbars
+  InitCommonControls(); // loads common control's DLL 
+
+  hwndInvert = CreateWindow("BUTTON", "Invert",
+			    WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON,
+			    10, 90, 50, 30, hwnd,
+			    (HMENU) ID_CHECKBOX_INVERT,
+			    hInstance, NULL);
+  
+  hwndTrackSM = CreateWindowEx( 
+        0,                               // no extended styles 
+        TRACKBAR_CLASS,                  // class name 
+        "Smooth Window",                 // title (caption) 
+        WS_CHILD | 
+        WS_VISIBLE,                      // style 
+        10, 10,                          // position 
+        200, 30,                         // size 
+        hwnd,                            // parent window 
+        (HMENU) ID_TRACKBAR_SM,                  // control identifier 
+        hInstance,                       // instance 
+        NULL                             // no WM_CREATE parameter 
+        ); 
+
+  hwndTrackLT = CreateWindowEx( 
+        0,                               // no extended styles 
+        TRACKBAR_CLASS,                  // class name 
+        "Linear Threshold",              // title (caption) 
+        WS_CHILD | 
+        WS_VISIBLE,                     // style 
+        10, 50,                         // position 
+        200, 30,                         // size 
+        hwnd,                            // parent window 
+        (HMENU) ID_TRACKBAR_LT,                  // control identifier 
+        hInstance,                       // instance 
+        NULL                             // no WM_CREATE parameter 
+        ); 
+
+  if (hwndTrackLT == NULL || hwndTrackSM == NULL || hwndInvert == NULL) {
+    MessageBox(NULL, "Window creation failed!", "ERROR!", MB_ICONEXCLAMATION | MB_OK);
+    return 0;
+  }
+  
   // step 3: message loop
   while (GetMessage(&Msg, NULL, 0, 0) > 0) {
     TranslateMessage(&Msg);
     DispatchMessage(&Msg);
   }
-  
+
   return Msg.wParam;
 }
