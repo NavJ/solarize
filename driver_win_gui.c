@@ -11,10 +11,10 @@
 #include <windows.h>
 #include <commctrl.h>
 
-#define IMG_PREVIEW_WIDTH   50
-#define IMG_PREVIEW_HEIGHT  50
+#define IMG_PREVIEW_WIDTH   100
+#define IMG_PREVIEW_HEIGHT  100
 #define IMG_PREVIEW_MAX_CH  4
-#define IMG_PREVIEW_SIZE    10000
+#define IMG_PREVIEW_SIZE    40000
 
 const char g_szClassName[] = "solarizeWindowClass";
 struct img_t {
@@ -27,6 +27,11 @@ struct img_t {
 } g_RawImage;
 
 struct preview_t {
+  HDC hdcImg;
+  BITMAPV5HEADER bmInfo;
+  HBITMAP bm;
+  bool isInit;
+  
   int iChannels;
   int iSmoothWindow;
   int iLinThreshold;
@@ -90,6 +95,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 				  IMG_PREVIEW_WIDTH, IMG_PREVIEW_HEIGHT, 0,
 				  iChannels, STBIR_ALPHA_CHANNEL_NONE, 0);
 	  g_Preview.iChannels = iChannels;
+	  g_Preview.bmInfo.bV5BitCount = iChannels * 8;
 	  g_Preview.iInvert = true;
 	  g_Preview.iSmoothWindow = DEFAULT_SMOOTH_WINDOW;
 	  g_Preview.iLinThreshold = DEFAULT_LIN_THRESHOLD;
@@ -102,8 +108,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 			     g_Preview.histogram[i]);
 	  
 	    // copy and solarize image data (TODO: refactor to remove this copy)
-	    memcpy(g_Preview.pchData, g_Preview.pchOrigData,
-		   IMG_PREVIEW_WIDTH * IMG_PREVIEW_HEIGHT * iChannels);
+	    memcpy(g_Preview.pchData, g_Preview.pchOrigData, IMG_PREVIEW_SIZE);
 	    solarize_channel(g_Preview.histogram[i],
 			     g_Preview.pchData,
 			     IMG_PREVIEW_WIDTH * IMG_PREVIEW_HEIGHT,
@@ -112,8 +117,28 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 			     g_Preview.iInvert);
 	  }
 
-	  // populate the bitmap
-	  // TODO
+	  // set the bitmap's bits and metadata
+	  int rc = SetDIBits(g_Preview.hdcImg,
+			     g_Preview.bm,
+			     0, IMG_PREVIEW_HEIGHT,
+			     g_Preview.pchData,
+			     (BITMAPINFO *) &g_Preview.bmInfo,
+			     DIB_PAL_COLORS);
+	  printf("%d scanlines set\n", rc);
+	  if (rc == 0) {
+	    HINSTANCE hInstance = GetModuleHandle(NULL);
+	    MessageBox(hwnd, szOpenFile,
+		       "Failed to set BITMAP bits!", MB_OK | MB_ICONEXCLAMATION);
+	  }
+
+	  // load the bitmap into the DC
+	  HGDIOBJ oldObj = SelectObject(g_Preview.hdcImg, g_Preview.bm);
+	  if (oldObj == NULL) {
+	    HINSTANCE hInstance = GetModuleHandle(NULL);
+	    MessageBox(hwnd, szOpenFile,
+		       "Failed to select object!", MB_OK | MB_ICONEXCLAMATION);
+	  }
+	  g_Preview.isInit = true;
 	  
 	  // display the solarized image
 	  PostMessage(hwnd, WM_PAINT, 0, 0);
@@ -187,7 +212,18 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     // draw the solarized image
     PAINTSTRUCT ps;
     HDC screen = BeginPaint(hwnd, &ps);
-    // TODO: Draw the image.
+    // if we have an image loaded, draw it to the screen
+    if (g_Preview.isInit) {
+      if (BitBlt(screen, 220, 10, IMG_PREVIEW_WIDTH, IMG_PREVIEW_HEIGHT,
+		 g_Preview.hdcImg, 0, 0, SRCCOPY) == 0) {
+	printf("Errorno: %ld\n", GetLastError());
+	HINSTANCE hInstance = GetModuleHandle(NULL);
+	MessageBox(hwnd, "BitBlt Error",
+		   "See command line", MB_OK | MB_ICONINFORMATION);
+      } else {
+	printf("BitBlt successful!\n");
+      }
+    }
     EndPaint(hwnd, &ps);
     break;
   }
@@ -229,6 +265,24 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     MessageBox(NULL, "Window Reg failed!", "ERROR!", MB_ICONEXCLAMATION | MB_OK);
     return 0;
   }
+
+  // init preview
+  g_Preview.bmInfo.bV5Size = sizeof(BITMAPV5HEADER);
+  g_Preview.bmInfo.bV5Width = IMG_PREVIEW_WIDTH;
+  g_Preview.bmInfo.bV5Height = IMG_PREVIEW_HEIGHT;
+  g_Preview.bmInfo.bV5Planes = 1;
+  g_Preview.bmInfo.bV5Compression = BI_RGB;
+  g_Preview.bmInfo.bV5CSType = /*LCS_sRGB*/ 0x73524742;
+  g_Preview.bmInfo.bV5Intent = LCS_GM_IMAGES;
+
+  g_Preview.hdcImg = CreateCompatibleDC(NULL);
+  if (SetICMMode(g_Preview.hdcImg, ICM_ON) == 0) {
+    MessageBox(NULL, "Window creation failed!", "ERROR!", MB_ICONEXCLAMATION | MB_OK);
+    return 0;    
+  }
+  g_Preview.bm = CreateCompatibleBitmap(g_Preview.hdcImg,
+					IMG_PREVIEW_WIDTH,
+					IMG_PREVIEW_HEIGHT);
 
   // step 2: make the window
   hwnd = CreateWindowEx(WS_EX_CLIENTEDGE,
